@@ -9,6 +9,10 @@ ARG GMP_VERSION=6.2.1
 # The version of GDB that we will build
 ARG GDB_VERSION=11.2
 
+ARG MPFR_VERSION=4.2.1
+
+ARG DEBIAN_FRONTEND=noninteractive
+
 # Install our build dependencies
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/apt \
@@ -20,7 +24,10 @@ RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/
 		curl \
 		mingw-w64 \
 		tar \
-		zip
+		zip \
+		texinfo
+		
+ARG DEBIAN_FRONTEND=
 
 # Create a non-root user and perform all build steps as this user (this simplifies things a little when later copying files out of the container image)
 RUN useradd --create-home --home /home/nonroot --shell /bin/bash --uid 1000 nonroot
@@ -30,6 +37,10 @@ USER nonroot
 RUN mkdir /tmp/src
 RUN curl -fSL "https://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz" -o "/tmp/gmp-${GMP_VERSION}.tar.xz" && \
 	tar xvf "/tmp/gmp-${GMP_VERSION}.tar.xz" --directory /tmp/src
+	
+# Download and extract the source code for MPFR
+RUN curl -fSL "https://www.mpfr.org/mpfr-${MPFR_VERSION}/mpfr-${MPFR_VERSION}.tar.gz" -o "/tmp/mpfr-${MPFR_VERSION}.tar.gz" && \
+	tar xvf "/tmp/mpfr-${MPFR_VERSION}.tar.gz" --directory /tmp/src
 
 # Download and extract the source code for GDB
 RUN curl -fSL "https://ftp.gnu.org/gnu/gdb/gdb-${GDB_VERSION}.tar.gz" -o "/tmp/gdb-${GDB_VERSION}.tar.gz" && \
@@ -40,6 +51,17 @@ RUN mkdir -p /tmp/build/gmp && cd /tmp/build/gmp && \
 	"/tmp/src/gmp-${GMP_VERSION}/configure" \
 		--prefix=/tmp/install/gmp \
 		--host=x86_64-w64-mingw32 \
+		--enable-static \
+		--disable-shared && \
+	make "-j${CPU_CORES}" && \
+	make install
+	
+# Cross-compile MPFR for Windows with MinGW-w64
+RUN mkdir -p /tmp/build/mpfr && cd /tmp/build/mpfr && \
+	"/tmp/src/mpfr-${MPFR_VERSION}/configure" \
+		--prefix=/tmp/install/mpfr \
+		--host=x86_64-w64-mingw32 \
+		--with-gmp=/tmp/install/gmp \
 		--enable-static \
 		--disable-shared && \
 	make "-j${CPU_CORES}" && \
@@ -56,7 +78,8 @@ RUN mkdir -p /tmp/build/gdb && cd /tmp/build/gdb && \
 		--host=x86_64-w64-mingw32 \
 		--target=x86_64-w64-mingw32 \
 		--enable-targets=all \
-		--with-libgmp-prefix=/tmp/install/gmp \
+		--with-gmp=/tmp/install/gmp \
+		--with-mpfr=/tmp/install/mpfr \
 		--with-static-standard-libraries \
 		--enable-static \
 		--disable-shared \
